@@ -1,4 +1,8 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
+import { QueryResult } from '../../types.js';
+import { cache, cacheKey } from '../../utils/cache.js';
+
+const CACHE_TOOL = 'query_omnifocus';
 
 export interface QueryOmnifocusParams {
   entity: 'tasks' | 'projects' | 'folders';
@@ -23,41 +27,30 @@ export interface QueryOmnifocusParams {
   summary?: boolean;
 }
 
-interface QueryResult {
-  success: boolean;
-  items?: any[];
-  count?: number;
-  error?: string;
-}
-
 export async function queryOmnifocus(params: QueryOmnifocusParams): Promise<QueryResult> {
+  const key = cacheKey(CACHE_TOOL, params as unknown as Record<string, unknown>);
+  const cached = cache.get<QueryResult>(key);
+  if (cached) return cached;
+
   try {
-    // Create JXA script for the query
     const jxaScript = generateQueryScript(params);
-    
-    // Write script to temp file and execute
-    const tempFile = `/tmp/omnifocus_query_${Date.now()}.js`;
-    const fs = await import('fs');
-    fs.writeFileSync(tempFile, jxaScript);
-    
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-    
-    // Clean up temp file
-    fs.unlinkSync(tempFile);
-    
+    const result = await executeOmniJS(jxaScript);
+
     if (result.error) {
       return {
         success: false,
         error: result.error
       };
     }
-    
-    return {
+
+    const queryResult: QueryResult = {
       success: true,
       items: params.summary ? undefined : result.items,
       count: result.count
     };
+
+    cache.set(key, queryResult);
+    return queryResult;
   } catch (error) {
     console.error('Error querying OmniFocus:', error);
     return {
@@ -185,6 +178,15 @@ function generateFilterConditions(entity: string, filters: any): string {
   const conditions: string[] = [];
   
   if (entity === 'tasks') {
+    if (filters.folderId) {
+      conditions.push(`
+        if (!item.containingProject || !item.containingProject.parentFolder ||
+            item.containingProject.parentFolder.id.primaryKey !== "${filters.folderId}") {
+          return false;
+        }
+      `);
+    }
+
     if (filters.projectName) {
       conditions.push(`
         if (item.containingProject) {
@@ -195,10 +197,10 @@ function generateFilterConditions(entity: string, filters: any): string {
         }
       `);
     }
-    
+
     if (filters.projectId) {
       conditions.push(`
-        if (!item.containingProject || 
+        if (!item.containingProject ||
             item.containingProject.id.primaryKey !== "${filters.projectId}") {
           return false;
         }
@@ -231,6 +233,14 @@ function generateFilterConditions(entity: string, filters: any): string {
       `);
     }
 
+    if (filters.deferredUntil !== undefined) {
+      conditions.push(`
+        if (!item.deferDate || !checkDateFilter(item.deferDate, ${filters.deferredUntil})) {
+          return false;
+        }
+      `);
+    }
+
     if (filters.plannedWithin !== undefined) {
       conditions.push(`
         if (!item.plannedDate || !checkDateFilter(item.plannedDate, ${filters.plannedWithin})) {
@@ -250,18 +260,37 @@ function generateFilterConditions(entity: string, filters: any): string {
   if (entity === 'projects') {
     if (filters.folderId) {
       conditions.push(`
-        if (!item.parentFolder || 
+        if (!item.parentFolder ||
             item.parentFolder.id.primaryKey !== "${filters.folderId}") {
           return false;
         }
       `);
     }
-    
+
     if (filters.status && filters.status.length > 0) {
       const statusCondition = filters.status.map((status: string) =>
         `projectStatusMap[item.status] === "${status}"`
       ).join(' || ');
       conditions.push(`if (!(${statusCondition})) return false;`);
+    }
+
+    if (filters.flagged !== undefined) {
+      conditions.push(`if (item.flagged !== ${filters.flagged}) return false;`);
+    }
+
+    if (filters.dueWithin !== undefined) {
+      conditions.push(`
+        if (!item.dueDate || !checkDateFilter(item.dueDate, ${filters.dueWithin})) {
+          return false;
+        }
+      `);
+    }
+
+    if (filters.tags && filters.tags.length > 0) {
+      const tagCondition = filters.tags.map((tag: string) =>
+        `item.tags.some(t => t.name === "${tag}")`
+      ).join(' || ');
+      conditions.push(`if (!(${tagCondition})) return false;`);
     }
 
     if (filters.reviewDue) {

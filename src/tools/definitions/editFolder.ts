@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { editFolder, EditFolderParams } from '../primitives/editFolder.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the folder to edit (preferred over name)"),
@@ -9,7 +9,7 @@ export const schema = z.object({
   newParentFolderName: z.string().optional().describe("Move folder to this parent folder (use empty string to move to root level)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   // Validation: Must provide id or name
   if (!args.id && !args.name) {
     return {
@@ -37,11 +37,12 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await editFolder(args as EditFolderParams);
 
     if (result.success) {
+      cache.invalidate();
       // Folder was edited successfully
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Folder "${result.name}" updated successfully. Changed: ${result.changedProperties}`
+          text: `Folder "${result.name}" updated successfully. Changed: ${result.changedProperties}`
         }]
       };
     } else {

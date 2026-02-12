@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { removeFolder, RemoveFolderParams } from '../primitives/removeFolder.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the folder to remove (preferred over name)"),
   name: z.string().optional().describe("The name of the folder to remove (used if id is not provided)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   // Validation: Must provide id or name
   if (!args.id && !args.name) {
     return {
@@ -24,12 +24,13 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await removeFolder(args as RemoveFolderParams);
 
     if (result.success) {
+      cache.invalidate();
       // Folder was removed successfully
-      let message = `✅ Folder "${result.name}" has been permanently deleted.`;
+      let message = `Folder "${result.name}" has been permanently deleted.`;
 
       // Report what was moved to root
       if (result.projectsMoved || result.childFoldersMoved) {
-        message += `\n\n📦 Before deletion, contents were moved to root level:`;
+        message += `\n\nBefore deletion, contents were moved to root level:`;
         if (result.projectsMoved) {
           message += `\n  • ${result.projectsMoved} project(s) moved to root`;
         }

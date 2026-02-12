@@ -7,6 +7,7 @@ yarn-error.log*
 # Build output
 dist/
 build/
+*.skill
 
 # Environment variables
 .env
@@ -34,16 +35,17 @@ coverage/
 .eslintcache
 
 # Optional REPL history
-.node_repl_history 
-test.js
-omnifocus_api_complete.txt
-mcpTypescriptREADME.txt
-devnotes.md
+.node_repl_history
 
-devnotes.md
+# User-specific data (template shipped as user-context.template.md)
+managing-omnifocus/references/user-context.md
+
+# Dev scratch files
+test.js
 devnotes.md
 ProjectDevNotes.md
-CLAUDE.md
+omnifocus_api_complete.txt
+mcpTypescriptREADME.txt
 exampleDump.txt
 MCP_OPTIMIZATION_STRATEGY.md
 DEPLOYMENT_GUIDE.md

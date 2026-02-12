@@ -2,9 +2,18 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFileSync } from 'fs';
+import { z } from 'zod';
+import { prewarm } from './utils/scriptExecution.js';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 
 // Import tool definitions
-import * as dumpDatabaseTool from './tools/definitions/dumpDatabase.js';
+import * as databaseOverviewTool from './tools/definitions/databaseOverview.js';
 import * as addOmniFocusTaskTool from './tools/definitions/addOmniFocusTask.js';
 import * as addProjectTool from './tools/definitions/addProject.js';
 import * as removeItemTool from './tools/definitions/removeItem.js';
@@ -21,78 +30,70 @@ import * as addFolderTool from './tools/definitions/addFolder.js';
 import * as editFolderTool from './tools/definitions/editFolder.js';
 import * as removeFolderTool from './tools/definitions/removeFolder.js';
 
-// Import resources
-import { getLibraryResource } from './resources/library.js';
-import { getInboxResource } from './resources/inbox.js';
-import { getFolderResource } from './resources/folder.js';
-import { getProjectResource } from './resources/project.js';
-import { getTaskResource } from './resources/task.js';
-
-// Import primitives for resource listing
-import { queryOmnifocus } from './tools/primitives/queryOmnifocus.js';
-
-// Import MCP types
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+// MCP resources removed — database_overview and query_omnifocus cover the same data
+// with better filtering, field selection, and TOON output. No clients were using resources.
 
 // Create an MCP server
 const server = new McpServer({
-  name: "OmniFocus MCP",
-  version: "1.0.0"
+  name: "OmniFocus",
+  version: pkg.version
+}, {
+  instructions: "OmniFocus task management server. IMPORTANT: Before calling any tools, check if the 'managing-omnifocus' Agent Skill is available and follow its decision tree for tool selection, workflow patterns, and coaching behaviour. The skill contains critical guidance for effective tool use. If the skill is not installed, it is included in the managing-omnifocus/ directory — see README. Read tools return TOON (Token-Oriented Object Notation) — a compact, schema-aware format. Write tools return text confirmations."
 });
 
 // Register tools
 server.tool(
-  "dump_database",
-  "Gets the current state of your OmniFocus database. Note: For browsing the folder/project/task hierarchy, prefer using MCP resources (omnifocus://library, omnifocus://folder/{id}, etc.) instead - they provide better navigation and are easier to read.",
-  dumpDatabaseTool.schema.shape,
-  dumpDatabaseTool.handler
+  "database_overview",
+  "Get a high-level overview of your OmniFocus database: statistics (active tasks, projects, folders, overdue, flagged, inbox counts) and folder/project hierarchy with task counts per project. Use this to understand the database structure before making targeted queries with query_omnifocus. Does NOT return individual tasks — use query_omnifocus for task details.",
+  databaseOverviewTool.schema.shape,
+  databaseOverviewTool.handler
 );
 
 server.tool(
-  "add_omnifocus_task",
-  "Add a new task to OmniFocus",
+  "add_task",
+  "Add a single task to OmniFocus. Supports placing in a project, as a subtask of another task, or in the inbox (default). Handles tags, dates, flags, time estimates, and notes. For adding 2+ tasks at once, use batch_add_items instead (10x faster, supports parent-child hierarchies via tempId).",
   addOmniFocusTaskTool.schema.shape,
   addOmniFocusTaskTool.handler
 );
 
 server.tool(
   "add_project",
-  "Add a new project to OmniFocus",
+  "Add a single project to OmniFocus. Supports placing in a folder, setting sequential/parallel, tags, dates, and notes. For creating a project with tasks in one call, use batch_add_items instead (creates project + tasks together with parent-child references).",
   addProjectTool.schema.shape,
   addProjectTool.handler
 );
 
 server.tool(
   "remove_item",
-  "PERMANENTLY DELETE a task or project from OmniFocus database. WARNING: This is destructive and cannot be undone. To mark tasks as done, use edit_item with newStatus='completed' instead. Only use this to delete items that were created by mistake or are duplicates.",
+  "PERMANENTLY DELETE a single task or project from OmniFocus. WARNING: This is destructive and cannot be undone. To mark tasks as done, use edit_item with newStatus='completed' instead. Only use this to delete items that were created by mistake or are duplicates. For deleting 2+ items, use batch_remove_items.",
   removeItemTool.schema.shape,
   removeItemTool.handler
 );
 
 server.tool(
   "edit_item",
-  "Edit a task or project in OmniFocus. Use this to mark tasks as completed (done) or dropped (abandoned), change properties, update dates, modify tags, set review intervals, etc. To mark a task as done, set newStatus='completed'. This is the primary tool for task management.",
+  "Edit a single task or project in OmniFocus. Use this to mark tasks as completed (newStatus='completed') or dropped (newStatus='dropped'), change properties, update dates, modify tags, set review intervals, etc. For editing 2+ items, use batch_edit_items instead (10-45x faster).",
   editItemTool.schema.shape,
   editItemTool.handler
 );
 
 server.tool(
   "move_task",
-  "Move a task to a different location in OmniFocus. Supports moving tasks from inbox to projects, between projects, back to inbox, or making tasks subtasks of other tasks. Use this for reorganizing your task hierarchy.",
+  "Move a single task to a different location in OmniFocus. Supports moving from inbox to projects, between projects, back to inbox, or making tasks subtasks of other tasks. For moving 2+ tasks to the same destination, use batch_move_tasks instead (10x faster).",
   moveTaskTool.schema.shape,
   moveTaskTool.handler
 );
 
 server.tool(
   "batch_add_items",
-  "Add multiple tasks or projects to OmniFocus in a single operation",
+  "Add multiple tasks and/or projects to OmniFocus in a single operation (10x faster than sequential add_task calls). Supports parent-child hierarchies via tempId/parentTempId references — create a project and its tasks, or nested subtasks, in one call. Use this for creating 2+ items, project structures from documents/transcripts, or any multi-item creation.",
   batchAddItemsTool.schema.shape,
   batchAddItemsTool.handler
 );
 
 server.tool(
   "batch_remove_items",
-  "Remove multiple tasks or projects from OmniFocus in a single operation",
+  "PERMANENTLY DELETE multiple tasks or projects from OmniFocus in a single operation. WARNING: This is destructive and cannot be undone. To mark items as done, use batch_edit_items with newStatus='completed' instead. Only use this to delete items that were created by mistake or are duplicates.",
   batchRemoveItemsTool.schema.shape,
   batchRemoveItemsTool.handler
 );
@@ -113,14 +114,14 @@ server.tool(
 
 server.tool(
   "query_omnifocus",
-  "Efficiently query OmniFocus database with powerful filters. Returns only active items by default (excludes completed/dropped tasks, done/dropped projects, and dropped folders). Get specific tasks, projects, or folders without loading the entire database. Supports filtering by project, tags, status, due dates, and more. Much faster than dump_database for targeted queries. Note: For browsing hierarchy (folders→projects→tasks), prefer MCP resources (omnifocus://library, omnifocus://folder/{id}, omnifocus://project/{id}) for better navigation.",
+  "Efficiently query OmniFocus database with powerful filters. Returns only active items by default (excludes completed/dropped). Get specific tasks, projects, or folders with filtering by project, tags, status, due dates, and more. Use database_overview first for structure, then this tool to drill into specifics.",
   queryOmniFocusTool.schema.shape,
   queryOmniFocusTool.handler
 );
 
 server.tool(
   "list_perspectives",
-  "List all available perspectives in OmniFocus, including built-in perspectives (Inbox, Projects, Tags, etc.) and custom perspectives (Pro feature)",
+  "List all available perspectives in OmniFocus, including built-in (Inbox, Projects, Tags, Forecast, etc.) and custom perspectives (Pro feature). Use this to discover what perspectives exist before calling get_perspective_view. Perspectives provide pre-configured filtered views of tasks.",
   listPerspectivesTool.schema.shape,
   listPerspectivesTool.handler
 );
@@ -153,130 +154,140 @@ server.tool(
   removeFolderTool.handler
 );
 
-// Register resources
-server.resource(
-  "OmniFocus Library",
-  "omnifocus://library",
-  { description: "Root folders and projects" },
-  async (uri) => {
-    const content = await getLibraryResource();
-    return {
-      contents: [{
-        uri: uri.href,
-        text: content
-      }]
-    };
-  }
+// Register prompts
+server.prompt(
+  "daily-plan",
+  "Plan your day: review overdue, due today, flagged, and planned tasks",
+  async () => ({
+    messages: [{
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Help me plan my day. Use the OmniFocus tools to:
+
+1. Get a database overview for current stats (overdue, flagged, inbox counts)
+2. Query overdue and due-soon tasks, sorted by due date
+3. Query tasks planned for today
+4. Check inbox count
+5. Query flagged tasks that are available
+
+Then summarise what needs my attention today, highlight anything overdue, and help me prioritise. If the inbox has items, offer to help process them.`
+      }
+    }]
+  })
 );
 
-server.resource(
-  "Inbox",
-  "omnifocus://inbox",
-  { description: "Unsorted tasks" },
-  async (uri) => {
-    const content = await getInboxResource();
-    return {
-      contents: [{
-        uri: uri.href,
-        text: content
-      }]
-    };
-  }
+server.prompt(
+  "weekly-review",
+  "GTD Weekly Review: Get Clear, Get Current, Get Creative",
+  async () => ({
+    messages: [{
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Run my GTD weekly review. Work through each phase step by step, using OmniFocus tools at each stage:
+
+**GET CLEAR**
+1. Show inbox items and help me process each one (assign to project, set dates, or delete)
+2. Ask if I have anything else to capture
+
+**GET CURRENT**
+3. Show recently completed tasks (last 7 days) — anything to celebrate or follow up on?
+4. Show all active projects with task counts — flag any with 0 tasks (stalled)
+5. Show the 20 stalest tasks (oldest modification date) — still relevant?
+6. Show waiting-for items if any exist
+7. Mark reviewed projects as reviewed when we're done with each
+
+**GET CREATIVE**
+8. Show on-hold/someday projects — any ready to activate or drop?
+9. Ask if I have new ideas or projects to capture
+
+Work through each step interactively. Wait for my input before moving to the next step.`
+      }
+    }]
+  })
 );
 
-// Register resource templates
-server.resource(
-  "Folder Contents",
-  new ResourceTemplate("omnifocus://folder/{folderId}", {
-    list: async () => {
-      // List all folders
-      const result = await queryOmnifocus({
-        entity: "folders",
-        fields: ["id", "name"]
-      });
-      return {
-        resources: (result.items || []).map((folder: any) => ({
-          uri: `omnifocus://folder/${folder.id}`,
-          name: folder.name,
-          description: `Folder: ${folder.name}`
-        }))
-      };
-    },
-    complete: undefined
-  }),
-  { description: "View folder hierarchy and projects" },
-  async (uri: any, variables: any) => {
-    const folderId = variables.folderId as string;
-    const content = await getFolderResource(folderId);
-    return {
-      contents: [{
-        uri: uri.href,
-        text: content
-      }]
-    };
-  }
+server.prompt(
+  "inbox-zero",
+  "Process inbox items to zero",
+  async () => ({
+    messages: [{
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Help me process my OmniFocus inbox to zero. Query all inbox items, then walk me through each one. For each item, help me decide:
+
+- Which project it belongs to (or if it needs a new project)
+- Whether it needs tags, dates, or flags
+- Whether it's actually actionable (delete if not)
+
+Use batch_move_tasks and batch_edit_items to process efficiently once we've decided on each item. Show me progress as we go.`
+      }
+    }]
+  })
 );
 
-server.resource(
-  "Project Details",
-  new ResourceTemplate("omnifocus://project/{projectId}", {
-    list: async () => {
-      // List all projects
-      const result = await queryOmnifocus({
-        entity: "projects",
-        fields: ["id", "name"]
-      });
-      return {
-        resources: (result.items || []).map((project: any) => ({
-          uri: `omnifocus://project/${project.id}`,
-          name: project.name,
-          description: `Project: ${project.name}`
-        }))
-      };
-    },
-    complete: undefined
-  }),
-  { description: "View project with all tasks" },
-  async (uri: any, variables: any) => {
-    const projectId = variables.projectId as string;
-    const content = await getProjectResource(projectId);
-    return {
-      contents: [{
-        uri: uri.href,
-        text: content
-      }]
-    };
-  }
+server.prompt(
+  "project-health",
+  "Check all projects for stalled, overdue, or review-due issues",
+  async () => ({
+    messages: [{
+      role: "user" as const,
+      content: {
+        type: "text" as const,
+        text: `Run a health check on my OmniFocus projects. Use the tools to:
+
+1. Get a database overview for the big picture
+2. Query all active projects with task counts, due dates, and review dates
+3. Identify problems:
+   - Projects with 0 tasks (stalled — no next action)
+   - Projects with overdue tasks
+   - Projects overdue for review
+   - Projects with no due date that might need one
+
+Summarise the findings and suggest specific actions for each problem project.`
+      }
+    }]
+  })
 );
 
-server.resource(
-  "Task Details",
-  new ResourceTemplate("omnifocus://task/{taskId}", {
-    list: async () => {
-      // List all incomplete tasks
-      const result = await queryOmnifocus({
-        entity: "tasks",
-        fields: ["id", "name"],
-        filters: { status: ["available", "blocked"] }
-      });
-      return {
-        resources: (result.items || []).map((task: any) => ({
-          uri: `omnifocus://task/${task.id}`,
-          name: task.name,
-          description: `Task: ${task.name}`
-        }))
-      };
-    },
-    complete: undefined
-  }),
-  { description: "View task with subtasks and context" },
-  async (uri: any, variables: any) => {
-    const taskId = variables.taskId as string;
-    const content = await getTaskResource(taskId);
+server.prompt(
+  "available-tasks",
+  "Find tasks matching your current context",
+  {
+    availableMinutes: z.string().optional().describe("How many minutes do you have? (e.g. '15', '30', '60')"),
+    tag: z.string().optional().describe("Context tag to filter by (e.g. 'calls', 'errands', 'computer')")
+  },
+  async ({ availableMinutes, tag }) => {
+    const filters: string[] = [];
+    filters.push('"status": ["Next", "Available"]');
+
+    if (tag) {
+      filters.push(`"tags": ["${tag}"]`);
+    }
+
+    let instructions = `Find tasks I can work on right now. Query available and next-action tasks`;
+
+    if (tag) {
+      instructions += ` tagged "${tag}"`;
+    }
+
+    if (availableMinutes) {
+      instructions += `, sorted by estimated time (shortest first), and highlight tasks under ${availableMinutes} minutes`;
+    } else {
+      instructions += `, sorted by due date`;
+    }
+
+    instructions += `. Include the fields: name, projectName, estimatedMinutes, dueDate, tagNames, flagged. Show flagged items first, then sort by the criteria above.`;
+
     return {
-      contents: [{
-        uri: uri.href,
-        text: content
+      messages: [{
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: instructions
+        }
       }]
     };
   }
@@ -291,6 +302,8 @@ const transport = new StdioServerTransport();
     console.error("Starting MCP server...");
     await server.connect(transport);
     console.error("MCP Server connected and ready to accept commands from Claude");
+    // Prewarm the OmniJS bridge in the background so the first tool call is fast
+    prewarm().catch(err => console.error(`Bridge prewarm failed: ${err}`));
   } catch (err) {
     console.error(`Failed to start MCP server: ${err}`);
   }

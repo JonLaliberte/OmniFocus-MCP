@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { batchEditItems, BatchEditItemParams } from '../primitives/batchEditItems.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   items: z.array(z.object({
@@ -39,7 +39,7 @@ export const schema = z.object({
   })).min(1).describe("Array of items to edit (minimum 1 item required)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that each item has either id or name
     for (let i = 0; i < args.items.length; i++) {
@@ -59,8 +59,9 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await batchEditItems(args.items as BatchEditItemParams[]);
 
     if (result.success) {
+      cache.invalidate();
       // Items were edited successfully
-      let message = `✅ Edited ${result.successCount} item${result.successCount !== 1 ? 's' : ''} successfully`;
+      let message = `Edited ${result.successCount} item${result.successCount !== 1 ? 's' : ''} successfully`;
 
       if (result.failureCount > 0) {
         message += `. Failed to edit ${result.failureCount} item${result.failureCount !== 1 ? 's' : ''}`;

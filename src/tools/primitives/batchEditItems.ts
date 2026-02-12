@@ -1,10 +1,5 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
-
-// Status options for tasks and projects
-type TaskStatus = 'incomplete' | 'completed' | 'dropped';
-type ProjectStatus = 'active' | 'completed' | 'dropped' | 'onHold';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
+import { TaskStatus, ProjectStatus } from '../../types.js';
 
 // Interface for batch item edit parameters
 export interface BatchEditItemParams {
@@ -322,25 +317,8 @@ function generateJXAScript(items: BatchEditItemParams[]): string {
  */
 export async function batchEditItems(items: BatchEditItemParams[]): Promise<BatchEditItemsResult> {
   try {
-    // Generate OmniJS script
     const script = generateJXAScript(items);
-
-    console.error("Executing OmniJS script for batch item editing...");
-    console.error(`Editing ${items.length} items`);
-
-    // Write script to temporary file
-    const tempFile = `${tmpdir()}/omnifocus_batch_edit_${Date.now()}.js`;
-    writeFileSync(tempFile, script);
-
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch (cleanupError) {
-      console.error("Failed to clean up temp file:", cleanupError);
-    }
+    const result = await executeOmniJS(script);
 
     if (result.error) {
       return {

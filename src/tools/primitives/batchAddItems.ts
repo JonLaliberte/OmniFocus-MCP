@@ -23,19 +23,7 @@ export type BatchAddItemsParams = {
   sequential?: boolean; // For projects
 };
 
-// Define the result type for individual operations
-type ItemResult = {
-  success: boolean;
-  id?: string;
-  error?: string;
-};
-
-// Define the result type for the batch operation
-type BatchResult = {
-  success: boolean;
-  results: ItemResult[];
-  error?: string;
-};
+import { ItemResult, BatchResult } from '../../types.js';
 
 /**
  * Add multiple items (tasks or projects) to OmniFocus

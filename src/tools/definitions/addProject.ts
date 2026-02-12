@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { addProject, AddProjectParams } from '../primitives/addProject.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   name: z.string().describe("The name of the project"),
@@ -14,12 +14,13 @@ export const schema = z.object({
   sequential: z.boolean().optional().describe("Whether tasks in the project should be sequential (default: false)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Call the addProject function 
     const result = await addProject(args as AddProjectParams);
     
     if (result.success) {
+      cache.invalidate();
       // Project was added successfully
       let locationText = args.folderName 
         ? `in folder "${args.folderName}"` 
@@ -40,7 +41,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Project "${args.name}" created successfully ${locationText}${dueDateText}${tagText}${sequentialText}.`
+          text: `Project "${args.name}" created successfully ${locationText}${dueDateText}${tagText}${sequentialText}.`
         }]
       };
     } else {

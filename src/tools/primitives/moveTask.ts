@@ -1,6 +1,4 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
 
 // Interface for task movement parameters
 export interface MoveTaskParams {
@@ -153,26 +151,8 @@ function generateJXAScript(params: MoveTaskParams): string {
  */
 export async function moveTask(params: MoveTaskParams): Promise<MoveTaskResult> {
   try {
-    // Generate OmniJS script
     const script = generateJXAScript(params);
-
-    console.error("Executing OmniJS script for task movement...");
-    console.error(`Task: ${params.taskId || params.taskName}`);
-    console.error(`Destination: ${params.toProjectName || params.toProjectId || params.toTaskName || params.toTaskId || (params.toInbox ? 'Inbox' : 'unknown')}`);
-
-    // Write script to temporary file
-    const tempFile = `${tmpdir()}/omnifocus_move_${Date.now()}.js`;
-    writeFileSync(tempFile, script);
-
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch (cleanupError) {
-      console.error("Failed to clean up temp file:", cleanupError);
-    }
+    const result = await executeOmniJS(script);
 
     if (result.error) {
       return {

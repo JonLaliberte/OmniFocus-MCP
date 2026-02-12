@@ -1,18 +1,19 @@
 import { z } from 'zod';
 import { addFolder, AddFolderParams } from '../primitives/addFolder.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   name: z.string().describe("The name of the folder"),
   parentFolderName: z.string().optional().describe("The name of the parent folder to nest this folder under (will create at root if not specified)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Call the addFolder function
     const result = await addFolder(args as AddFolderParams);
 
     if (result.success) {
+      cache.invalidate();
       // Folder was added successfully
       let locationText = args.parentFolderName
         ? `nested under "${args.parentFolderName}"`
@@ -21,7 +22,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Folder "${args.name}" created successfully ${locationText}.`
+          text: `Folder "${args.name}" created successfully ${locationText}.`
         }]
       };
     } else {

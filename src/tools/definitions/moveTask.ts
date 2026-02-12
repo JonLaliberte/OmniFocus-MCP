@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { moveTask, MoveTaskParams } from '../primitives/moveTask.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   // Source task (ONE required)
@@ -22,7 +22,7 @@ export const schema = z.object({
     .describe("Move task back to inbox (set to true)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that either taskId or taskName is provided
     if (!args.taskId && !args.taskName) {
@@ -69,8 +69,9 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await moveTask(args as MoveTaskParams);
 
     if (result.success) {
+      cache.invalidate();
       // Task was moved successfully
-      let message = `✅ Moved task "${result.taskName}"`;
+      let message = `Moved task "${result.taskName}"`;
 
       if (result.fromLocation) {
         message += ` from ${result.fromLocation}`;

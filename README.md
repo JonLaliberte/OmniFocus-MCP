@@ -1,479 +1,162 @@
 # OmniFocus MCP Server
 
-> **Note**: This is a fork of [themotionmachine/OmniFocus-MCP](https://github.com/themotionmachine/OmniFocus-MCP) with additional features and enhancements. Changes are being contributed back upstream via pull requests. If you want to use these features now before they're merged, see the [installation instructions](#installing-this-fork) below.
+A Model Context Protocol (MCP) server that gives AI assistants full access to your OmniFocus task management system — querying, creating, editing, moving, and deleting tasks and projects through natural language.
 
-A Model Context Protocol (MCP) server that integrates with OmniFocus to enable Claude (or other MCP-compatible clients) to interact with your tasks and projects.
+Originally forked from [themotionmachine/OmniFocus-MCP](https://github.com/themotionmachine/OmniFocus-MCP). This is a ground-up rewrite with a new execution engine, token-optimised output, batch operations, an agent skill, and 16 tools.
 
 ![OmniFocus MCP](assets/omnifocus-mcp-logo.png)
 
-## Overview
+## What's Changed from the Original
 
-This MCP server creates a bridge between AI assistants (like Claude) and your OmniFocus task management system. It gives AI models the ability to view, create, edit, and remove tasks and projects in your OmniFocus database through natural language conversations.
-Some ways you could use it:
+| Area | Original Fork | This Version |
+|------|--------------|--------------|
+| **Automation engine** | AppleScript, temp files, new process per call | OmniJS via persistent `osascript` PTY bridge — 200-800ms per call after warmup |
+| **Database access** | `dump_database` (entire DB as text blob) | `database_overview` (stats + tree) + `query_omnifocus` (filtered, field-selected) |
+| **Output format** | Unstructured text | [TOON](https://github.com/toon-format/toon) — ~40% fewer tokens than JSON, better LLM parsing accuracy |
+| **Tools** | 5 basic tools | 16 tools including batch operations (10-45x faster), folder management, perspectives, reviews |
+| **Agent skill** | None | Full [Agent Skill](https://agentskills.io/) with decision tree, GTD coaching, workflow patterns |
+| **MCP prompts** | None | 5 predefined workflows: daily plan, weekly review, inbox zero, project health, available tasks |
+| **Annotations** | None | Tool results split user-facing summaries from model-facing data |
+| **Error handling** | Basic | JSON sanitization (UTF-16 surrogates), 30s execution timeouts, graceful bridge recovery |
 
-- Translate the PDF of a syllabus into a fully specificed project with tasks, tags, defer dates, and due dates.
-- Turn a meeting transcript into a list of actions
-- Create visualizations of your tasks, projects, and tags
-- Process multiple tasks or projects in a single operation
-- Bulk manage your OmniFocus items efficiently
+## What You Can Do With It
 
-## What's New in This Fork
+- Turn a PDF syllabus into a fully specified project with tasks, tags, defer dates, and due dates
+- Process a meeting transcript into action items assigned to projects
+- Run a GTD weekly review — inbox processing, stale task triage, project health checks
+- Bulk-edit dozens of tasks in a single operation (flags, dates, tags, status)
+- Query your database with complex filters: overdue + flagged + tagged "work" + due within 7 days
+- Visualise your task landscape with charts and summaries
 
-This fork includes several enhancements over the upstream version:
-
-### Architecture Improvements
-- **Migrated from AppleScript to OmniJS**: Faster, more reliable automation with better error handling and maintainability
-- **Enhanced tool descriptions**: More detailed guidance for AI models to use tools effectively
-
-### New Features
-- **MCP Resources**: Automatic context generation for folders, projects, tasks, and inbox with hierarchical navigation
-- **Folder Management**: Create, edit, and remove folders with `add_folder`, `edit_folder`, and `remove_folder` tools
-- **Task Movement**: New `move_task` and `batch_move_task` tools for reorganizing tasks efficiently
-- **Batch Operations**: `batch_edit_items` for high-performance bulk editing (10-45x faster than sequential edits)
-- **Review Management**: Set review intervals and mark projects as reviewed
-- **Planned Date Support**: Full support for OmniFocus 4.7's new planned date feature
-
-### Performance
-- Batch operations provide significant speedups: ~230ms for batch vs 2.26s for 10 sequential operations
-
-**Known Issues**
-- Dump_database tool currently fails for very large omnifocus databases.
-
-## Roadmap
-- ~~Enable the client to interact with perspectives~~ ✅ (Added list_perspectives and get_perspective_view)
-- ~~Add support for the new `planned` date type in Omnifocus 4.7~~ ✅ (Added plannedDate support for tasks)
-- ~~Migrate from AppleScript to OmniJS~~ ✅ (Completed)
-- ~~Add folder management capabilities~~ ✅ (Added add_folder, edit_folder, remove_folder)
-- ~~Implement MCP resource features~~ ✅ (Added resource generation for better context)
-- Support manipulating notifications for projects and tasks
-- Enhance perspective integration
-
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - macOS with OmniFocus installed
 
-### Installing the Original Version
+### Installation
 
-1. In Claude Desktop, add this MCP server to your configuration file at:
-```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
-
-2. Add the following configuration:
+Add to your Claude configuration:
 ```json
 {
   "mcpServers": {
     "omnifocus": {
       "command": "npx",
-      "args": ["-y", "omnifocus-mcp"]
+      "args": ["-y", "github:mattsmallman/omnifocus-mcp"]
     }
   }
 }
 ```
 
-3. Restart Claude Desktop
+### Agent Skill (Recommended)
 
-### Installing This Fork
+The agent skill teaches Claude *how* to use the tools effectively — decision trees, GTD coaching, workflow patterns, and query optimisation. Without it, Claude will use the tools but won't have the context to choose the right tool or structure efficient queries.
 
-To use the enhanced features in this fork before they're merged upstream:
-
-1. Edit your Claude Desktop configuration file at:
+**Claude Desktop / claude.ai:**
+```bash
+npm run build  # produces managing-omnifocus.skill
 ```
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
+Upload `managing-omnifocus.skill` in Settings > Features > Agent Skills.
 
-2. Add this configuration to use the fork directly from GitHub:
-```json
-{
-  "mcpServers": {
-    "omnifocus": {
-      "command": "npx",
-      "args": ["-y", "github:mattsmallman/OmniFocus-MCP"]
-    }
-  }
-}
+**Claude Code:**
+```bash
+# Global (available in all projects)
+mkdir -p ~/.claude/skills
+ln -s /path/to/OmniFocus-MCP/managing-omnifocus ~/.claude/skills/managing-omnifocus
 ```
 
-3. Restart Claude Desktop
+## Architecture
 
-**Note**: You can also specify a specific branch if needed:
-```json
-"args": ["-y", "github:mattsmallman/OmniFocus-MCP#add-planned-date-support"]
+### Persistent OmniJS Bridge
+
+Unlike the original fork (which spawned a new `osascript` process per call with temp files), this server maintains a persistent `osascript -l JavaScript -i` process via a Python PTY wrapper. The first call warms up the bridge (~5s), then subsequent calls complete in 200-800ms. Scripts are piped directly to stdin — no temp files written.
+
+### TOON Output Format
+
+Read tools return results in [TOON (Token-Oriented Object Notation)](https://github.com/toon-format/toon) instead of JSON. TOON uses ~40% fewer tokens while improving LLM parsing accuracy. Uniform arrays of tasks/projects compress into CSV-style tabular rows with the schema declared once:
+
+```
+count: 3
+items[3]{id,name,flagged,dueDate,projectName}:
+  abc,Buy groceries,false,2026-02-15,Errands
+  def,Call dentist,true,2026-02-13,Health
+  ghi,Review report,false,,Work
 ```
 
-## Use Cases
+Write tools return plain text confirmations.
 
-### Efficient Task Queries
-Use the new `query_omnifocus` tool for fast, targeted searches:
-> "Show me tasks due today"
-> "Get all flagged items in my Work project"  
-> "Count how many tasks are in each project"
+### Annotations
 
-### Reorganize your projects, tasks, and tags
-> "I want every task to have an energy level tag. Show me a list of all the tasks that don't have an energy level tag and your suggestions for what tag to add. I'll make any changes I think are appropriate. Then make the changes in OmniFocus."
+All read tool results include [MCP annotations](https://modelcontextprotocol.io/specification/2025-11-05/server/utilities/annotations) that split the response into two content blocks:
 
-### Add tasks from any conversation
+- **User-facing summary** (`audience: ["user"]`, `priority: 1`) — e.g. "Found 12 tasks."
+- **Model-facing data** (`audience: ["assistant"]`, `priority: 0.5`) — full TOON-encoded results
 
-> "Ok, thanks for the detailed explanation of why the rule of law is important. Add a recurring task to my activism project that reminds me to call my representative weekly. Include a summary of this conversation in the notes field."
+Clients that support annotations can display the clean summary to the user while the model processes the full dataset. Clients that don't support annotations show both (current default behaviour).
 
-### Quick, Virtual Perspectives
+### Batch Operations
 
-Get a summary of your current tasks and manage them conversationally:
+All batch tools (`batch_add_items`, `batch_edit_items`, `batch_move_tasks`, `batch_remove_items`) execute as a single OmniJS script rather than sequential calls. This gives 10-45x speedups depending on item count. `batch_add_items` supports parent-child hierarchies via `tempId`/`parentTempId` references.
 
-> "Show me all my flagged tasks due this week"
+## Tools
 
-Or create custom views:
+### Reading
 
-> "What are my next actions in the Work folder?"
+| Tool | Purpose |
+|------|---------|
+| `database_overview` | Stats (overdue, flagged, inbox counts) + folder/project tree. No individual tasks. |
+| `query_omnifocus` | Filtered queries with field selection, sorting, limits. Supports tasks, projects, folders. |
+| `list_perspectives` | List built-in and custom perspectives. |
+| `get_perspective_view` | Get items visible in a specific perspective. |
 
-### Work with OmniFocus Perspectives
+### Writing
 
-List and view your perspectives:
+| Tool | Purpose |
+|------|---------|
+| `add_task` | Add a single task with project, dates, tags, parent task. |
+| `add_project` | Add a project with folder, dates, sequential/parallel. |
+| `add_folder` | Create a folder, optionally nested. |
+| `edit_item` | Edit any property of a task or project. |
+| `edit_folder` | Rename or move a folder. |
+| `move_task` | Move a task between projects, to inbox, or as subtask. |
+| `remove_item` | Permanently delete a task or project. |
+| `remove_folder` | Permanently delete a folder. |
 
-> "What perspectives do I have available?"
-> "Show me what's in my Inbox perspective"
-> "Get the flagged items from my current perspective"
+### Batch Operations
 
-### Reorganize Tasks
+| Tool | Purpose | Speedup |
+|------|---------|---------|
+| `batch_add_items` | Add multiple tasks/projects with hierarchy support. | 10x |
+| `batch_edit_items` | Edit multiple items at once. | 10-45x |
+| `batch_move_tasks` | Move multiple tasks to the same destination. | 10x |
+| `batch_remove_items` | Remove multiple items. | 10x |
 
-Move tasks between projects or make them subtasks:
+## MCP Prompts
 
-> "Move all my inbox tasks about groceries to my Shopping project"
-> "Make the task 'Research options' a subtask of 'Buy new laptop'"
-> "Move the 'Review Q4 budget' task back to inbox - I need to think about it more"
+Predefined workflow templates that clients can surface as selectable actions. No need to remember tool names or query syntax — pick a prompt and the workflow runs.
 
-### Process Transcripts or PDFs
+| Prompt | Description |
+|--------|-------------|
+| `daily-plan` | Morning planning: overdue, due today, flagged, planned tasks, inbox check |
+| `weekly-review` | Full GTD weekly review: Get Clear, Get Current, Get Creative |
+| `inbox-zero` | Walk through inbox items one by one, process to projects |
+| `project-health` | Audit all projects for stalled, overdue, or review-due issues |
+| `available-tasks` | Find tasks matching your current context (optional: time available, tag filter) |
 
-Extract action items from meeting transcripts, academic research articles, or notes:
+## Agent Skill
 
-> "I'm pasting in the transcript from today's meeting. Please analyze it and create tasks in OmniFocus for any action items assigned to me. Put them in my 'Product Development' project."
+The `managing-omnifocus/` directory is a standalone [Agent Skill](https://agentskills.io/) that provides:
 
+- **Decision tree** — routes requests to the right tool
+- **GTD coaching** — proactive task management, health signals, capture prompts
+- **Workflow patterns** — daily planning, inbox processing, weekly review
+- **Query reference** — complete filter, field, and sort documentation
+- **Setup guide** — first-use onboarding
+- **Persistent user context** — cached preferences and structure
 
-## 🔧 Available Tools
-
-The server currently provides these tools:
-
-### `query_omnifocus` ⭐ NEW
-Efficiently query your OmniFocus database with powerful filters. Get specific tasks, projects, or folders without loading the entire database.
-
-Key Features:
-- **Filter by multiple criteria**: project, tags, status, due dates, flags, and more
-- **Request specific fields**: Reduce response size by only getting the data you need
-- **Sort and limit results**: Control the output format
-- **Much faster than dump_database** for targeted queries
-
-Common Uses:
-```
-"Show me all flagged tasks due this week"
-"Get next actions from my Work project"
-"Count tasks in each project" (use with summary: true)
-"Find all tasks deferred until tomorrow"
-```
-
-Parameters:
-- `entity`: Type to query ('tasks', 'projects', or 'folders')
-- `filters`: (Optional) Narrow results by project, tags, status, dates, etc.
-- `fields`: (Optional) Specific fields to return (id, name, dueDate, etc.)
-- `limit`: (Optional) Maximum items to return
-- `sortBy`: (Optional) Field to sort by
-- `includeCompleted`: (Optional) Include completed items (default: false)
-- `summary`: (Optional) Return only count instead of full details
-
-### `dump_database`
-Gets the complete current state of your OmniFocus database. Best for comprehensive analysis or when you need everything.
-
-Parameters:
-- `hideCompleted`: (Optional) Hide completed/dropped tasks (default: true)
-- `hideRecurringDuplicates`: (Optional) Hide duplicate recurring tasks (default: true)
-
-### `add_omnifocus_task`
-Add a new task to OmniFocus.
-
-Parameters:
-- `name`: The name of the task
-- `projectName`: (Optional) The name of the project to add the task to
-- `note`: (Optional) Additional notes for the task
-- `dueDate`: (Optional) The due date of the task in ISO format
-- `deferDate`: (Optional) The defer date of the task in ISO format
-- `plannedDate`: (Optional) The planned date of the task in ISO format - indicates intention to work on this task on this date
-- `flagged`: (Optional) Whether the task is flagged or not
-- `estimatedMinutes`: (Optional) Estimated time to complete the task
-- `tags`: (Optional) Tags to assign to the task
-- `parentTaskId`: (Optional) Create under an existing parent task by ID
-- `parentTaskName`: (Optional) Create under first matching parent task by name (fallback)
-
-### `add_project`
-Add a new project to OmniFocus.
-
-Parameters:
-- `name`: The name of the project
-- `folderName`: (Optional) The name of the folder to add the project to
-- `note`: (Optional) Additional notes for the project
-- `dueDate`: (Optional) The due date of the project in ISO format
-- `deferDate`: (Optional) The defer date of the project in ISO format
-- `flagged`: (Optional) Whether the project is flagged or not
-- `estimatedMinutes`: (Optional) Estimated time to complete the project
-- `tags`: (Optional) Tags to assign to the project
-- `sequential`: (Optional) Whether tasks in the project should be sequential
-
-### `add_folder` ⭐ NEW
-Create a new folder in OmniFocus. Folders help organize projects into logical groups.
-
-Parameters:
-- `name`: The name of the folder
-- `parentFolderName`: (Optional) Name of parent folder to nest this folder under (creates at root if not specified)
-
-Examples:
-```
-"Create a folder called Work"
-→ add_folder({name: "Work"})
-
-"Create a nested folder for Q4 projects under Work"
-→ add_folder({name: "Q4 2025", parentFolderName: "Work"})
-```
-
-### `edit_folder` ⭐ NEW
-Edit a folder in OmniFocus. Rename folders or move them to different parent folders.
-
-Parameters:
-- `id`: (Optional) The ID of the folder to edit (preferred)
-- `name`: (Optional) The name of the folder to edit (used if id not provided)
-- `newName`: (Optional) New name for the folder
-- `newParentFolderName`: (Optional) Move to this parent folder (use empty string to move to root)
-
-Examples:
-```
-"Rename the Work folder to Professional"
-→ edit_folder({name: "Work", newName: "Professional"})
-
-"Move Q4 2025 folder to root level"
-→ edit_folder({name: "Q4 2025", newParentFolderName: ""})
-
-"Nest Personal folder under Life"
-→ edit_folder({name: "Personal", newParentFolderName: "Life"})
-```
-
-### `remove_folder` ⭐ NEW
-Permanently delete a folder from OmniFocus. **WARNING**: This is destructive and cannot be undone. Any projects in the folder will be moved to the root level.
-
-Parameters:
-- `id`: (Optional) The ID of the folder to remove (preferred)
-- `name`: (Optional) The name of the folder to remove (used if id not provided)
-
-### `remove_item`
-Remove a task or project from OmniFocus.
-
-Parameters:
-- `id`: (Optional) The ID of the task or project to remove
-- `name`: (Optional) The name of the task or project to remove
-- `itemType`: The type of item to remove ('task' or 'project')
-
-### `edit_item`
-Edit a task or project in OmniFocus.
-
-Parameters:
-- `id`: (Optional) The ID of the task or project to edit
-- `name`: (Optional) The name of the task or project to edit
-- `itemType`: The type of item to edit ('task' or 'project')
-- Various parameters for editing properties
-
-### `move_task` ⭐ NEW
-Move a task to a different location in OmniFocus. Supports moving tasks between projects, from inbox to projects, back to inbox, or making tasks subtasks of other tasks.
-
-Parameters:
-- **Source Task** (provide ONE):
-  - `taskId`: ID of the task to move (preferred)
-  - `taskName`: Name of the task to move
-- **Destination** (provide ONE):
-  - `toProjectId`: Move to this project (by ID, preferred)
-  - `toProjectName`: Move to this project (by name)
-  - `toTaskId`: Make subtask of this task (by ID)
-  - `toTaskName`: Make subtask of this task (by name)
-  - `toInbox`: Set to `true` to move back to inbox
-
-Examples:
-```
-"Move the 'Buy milk' task from inbox to my Shopping project"
-→ move_task({taskName: "Buy milk", toProjectName: "Shopping"})
-
-"Make 'Write intro' a subtask of 'Write documentation'"
-→ move_task({taskName: "Write intro", toTaskName: "Write documentation"})
-
-"Move task back to inbox for re-evaluation"
-→ move_task({taskId: "abc123", toInbox: true})
-```
-
-### `batch_add_items`
-Add multiple tasks or projects to OmniFocus in a single operation.
-
-Parameters:
-- `items`: Array of items to add, where each item can be:
-  - `type`: The type of item ('task' or 'project')
-  - `name`: The name of the item
-  - `note`: (Optional) Additional notes
-  - `dueDate`: (Optional) Due date in ISO format
-  - `deferDate`: (Optional) Defer date in ISO format
-  - `plannedDate`: (Optional) Planned date in ISO format (tasks only)
-  - `flagged`: (Optional) Whether the item is flagged
-  - `estimatedMinutes`: (Optional) Estimated completion time
-  - `tags`: (Optional) Array of tags
-  - `projectName`: (Optional) For tasks: the project to add to
-  - `folderName`: (Optional) For projects: the folder to add to
-  - `sequential`: (Optional) For projects: whether tasks are sequential
-  - `parentTaskId`: (Optional, tasks): Parent task by ID
-  - `parentTaskName`: (Optional, tasks): Parent task by name (fallback)
-  - `tempId`: (Optional, tasks): Temporary ID for within-batch references
-  - `parentTempId`: (Optional, tasks): Reference to another item's `tempId` to establish hierarchy
-  - `hierarchyLevel`: (Optional, tasks): Ordering hint (0 for root, 1 for child, ...)
-
-Examples:
-```
-{
-  "items": [
-    { "type": "task", "name": "Parent", "projectName": "My Project", "tempId": "p1" },
-    { "type": "task", "name": "Child A", "parentTempId": "p1" },
-    { "type": "task", "name": "Child B", "parentTempId": "p1" }
-  ]
-}
-```
-
-### `batch_remove_items`
-Remove multiple tasks or projects from OmniFocus in a single operation.
-
-Parameters:
-- `items`: Array of items to remove, where each item can be:
-  - `id`: (Optional) The ID of the item to remove
-  - `name`: (Optional) The name of the item to remove
-  - `itemType`: The type of item ('task' or 'project')
-
-### `batch_move_tasks` ⭐ NEW
-Move multiple tasks to the same destination in a single operation. **Much faster than moving tasks one by one** (10x speedup).
-
-**Performance**: One batch operation takes ~230ms vs ~2.26s for 10 sequential moves.
-
-Parameters:
-- `tasks`: Array of tasks to move (minimum 1), where each task has:
-  - `taskId`: (Optional) ID of the task to move (preferred)
-  - `taskName`: (Optional) Name of the task to move
-- **Destination** (provide ONE):
-  - `toProjectId`: Move all tasks to this project (by ID)
-  - `toProjectName`: Move all tasks to this project (by name)
-  - `toTaskId`: Make all tasks subtasks of this task (by ID)
-  - `toTaskName`: Make all tasks subtasks of this task (by name)
-  - `toInbox`: Set to `true` to move all tasks to inbox
-
-Examples:
-```
-"Move all tasks starting with 'Buy' to my Shopping project"
-→ batch_move_tasks({
-    tasks: [{taskName: "Buy milk"}, {taskName: "Buy eggs"}],
-    toProjectName: "Shopping"
-  })
-
-"Move these 5 inbox tasks to be subtasks of 'Plan vacation'"
-→ batch_move_tasks({
-    tasks: [{taskId: "abc"}, {taskId: "def"}, ...],
-    toTaskName: "Plan vacation"
-  })
-```
-
-### `batch_edit_items` ⭐ NEW
-Edit multiple tasks or projects in a single operation. **Much faster than editing one by one** (10x speedup for 10 items, 45x speedup for 50 items).
-
-**Performance**: One batch operation takes ~230ms vs ~2.26s for 10 sequential edits, or ~11.3s for 50 sequential edits.
-
-Supports all editing operations:
-- Change properties (name, note, dates, flags, estimated time)
-- Update task status (complete, drop, reopen)
-- Modify tags (add, remove, or replace all)
-- Update project settings (sequential, status, folder, review interval)
-
-Parameters:
-- `items`: Array of items to edit (minimum 1), where each item has:
-  - **Identification** (provide ONE):
-    - `id`: ID of the task/project (preferred)
-    - `name`: Name of the task/project
-  - `itemType`: Type ('task' or 'project')
-  - **Common fields** (all optional):
-    - `newName`: New name
-    - `newNote`: New note
-    - `newDueDate`: New due date (ISO format or empty string to clear)
-    - `newDeferDate`: New defer date (ISO format or empty string to clear)
-    - `newPlannedDate`: New planned date (tasks only, ISO format or empty string to clear)
-    - `newFlagged`: Set flagged status (true/false)
-    - `newEstimatedMinutes`: Estimated completion time
-  - **Task-specific fields** (optional):
-    - `newStatus`: 'completed', 'dropped', or 'incomplete'
-    - `addTags`: Tags to add
-    - `removeTags`: Tags to remove
-    - `replaceTags`: Replace all existing tags
-  - **Project-specific fields** (optional):
-    - `newSequential`: Whether project is sequential
-    - `newFolderName`: Move project to folder
-    - `newProjectStatus`: 'active', 'completed', 'dropped', or 'onHold'
-    - `newReviewInterval`: {steps: number, unit: 'days'|'weeks'|'months'|'years'}
-    - `markReviewed`: Mark project as reviewed (sets lastReviewDate to now)
-
-Examples:
-```
-"Mark all my flagged tasks as completed"
-→ batch_edit_items({
-    items: [
-      {id: "abc", itemType: "task", newStatus: "completed"},
-      {id: "def", itemType: "task", newStatus: "completed"},
-      ...
-    ]
-  })
-
-"Add 'urgent' tag to all tasks due today"
-→ batch_edit_items({
-    items: [
-      {id: "abc", itemType: "task", addTags: ["urgent"]},
-      {id: "def", itemType: "task", addTags: ["urgent"]},
-      ...
-    ]
-  })
-
-"Update multiple project review intervals"
-→ batch_edit_items({
-    items: [
-      {name: "Work Project", itemType: "project", newReviewInterval: {steps: 1, unit: "weeks"}},
-      {name: "Home Project", itemType: "project", newReviewInterval: {steps: 2, unit: "weeks"}}
-    ]
-  })
-```
-
-### `list_perspectives` ⭐ NEW
-List all available perspectives in OmniFocus, including built-in and custom perspectives.
-
-Parameters:
-- `includeBuiltIn`: (Optional) Include built-in perspectives like Inbox, Projects, Tags (default: true)
-- `includeCustom`: (Optional) Include custom perspectives (Pro feature) (default: true)
-
-Returns:
-- List of perspectives with their names, types (builtin/custom), and whether they can be modified
-
-### `get_perspective_view` ⭐ NEW
-Get the items visible in the current OmniFocus perspective. Shows what tasks and projects are displayed.
-
-Parameters:
-- `perspectiveName`: Name of the perspective to view (e.g., 'Inbox', 'Projects', 'Flagged')
-- `limit`: (Optional) Maximum number of items to return (default: 100)
-- `includeMetadata`: (Optional) Include additional metadata like tags and dates (default: true)
-- `fields`: (Optional) Specific fields to include in the response
-
-Note: This tool returns the content of the current perspective window. Due to OmniJS limitations, it cannot programmatically switch perspectives.
-
-## Development
-
-Documentation to follow.
-
-## How It Works
-
-This server uses OmniJS (OmniFocus's JavaScript automation API) to communicate with OmniFocus, allowing it to interact with the application's native functionality. OmniJS provides direct access to OmniFocus objects and methods, making the integration fast and maintainable. The server is built using the Model Context Protocol SDK, which provides a standardized way for AI models to interact with external tools and systems.
-
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Acknowledgements
+
+This project was originally based on [themotionmachine/OmniFocus-MCP](https://github.com/themotionmachine/OmniFocus-MCP). Thanks to the original authors for the foundation that this project built upon.

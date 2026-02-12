@@ -1,6 +1,4 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
 
 // Interface for item removal parameters
 export interface RemoveItemParams {
@@ -84,25 +82,8 @@ function generateJXAScript(params: RemoveItemParams): string {
  */
 export async function removeItem(params: RemoveItemParams): Promise<{success: boolean, id?: string, name?: string, error?: string}> {
   try {
-    // Generate OmniJS script
     const script = generateJXAScript(params);
-
-    console.error("Executing OmniJS script for removal...");
-    console.error(`Item type: ${params.itemType}, ID: ${params.id || 'not provided'}, Name: ${params.name || 'not provided'}`);
-
-    // Write script to temporary file
-    const tempFile = `${tmpdir()}/omnifocus_remove_${Date.now()}.js`;
-    writeFileSync(tempFile, script);
-
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch (cleanupError) {
-      console.error("Failed to clean up temp file:", cleanupError);
-    }
+    const result = await executeOmniJS(script);
 
     if (result.error) {
       return {

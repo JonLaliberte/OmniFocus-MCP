@@ -1,10 +1,5 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
-
-// Status options for tasks and projects
-type TaskStatus = 'incomplete' | 'completed' | 'dropped';
-type ProjectStatus = 'active' | 'completed' | 'dropped' | 'onHold';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
+import { TaskStatus, ProjectStatus } from '../../types.js';
 
 // Interface for item edit parameters
 export interface EditItemParams {
@@ -260,25 +255,8 @@ export async function editItem(params: EditItemParams): Promise<{
   error?: string
 }> {
   try {
-    // Generate JXA script
     const script = generateJXAScript(params);
-
-    console.error("Executing JXA script for editing...");
-    console.error(`Item type: ${params.itemType}, ID: ${params.id || 'not provided'}, Name: ${params.name || 'not provided'}`);
-
-    // Write script to temporary file
-    const tempFile = `${tmpdir()}/omnifocus_edit_${Date.now()}.js`;
-    writeFileSync(tempFile, script);
-
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-
-    // Clean up temp file
-    try {
-      unlinkSync(tempFile);
-    } catch (cleanupError) {
-      console.error("Failed to clean up temp file:", cleanupError);
-    }
+    const result = await executeOmniJS(script);
 
     if (result.error) {
       return {

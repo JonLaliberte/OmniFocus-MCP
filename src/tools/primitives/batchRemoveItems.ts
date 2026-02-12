@@ -3,20 +3,7 @@ import { removeItem, RemoveItemParams } from './removeItem.js';
 // Define the parameters for the batch removal operation
 export type BatchRemoveItemsParams = RemoveItemParams;
 
-// Define the result type for individual operations
-type ItemResult = {
-  success: boolean;
-  id?: string;
-  name?: string;
-  error?: string;
-};
-
-// Define the result type for the batch operation
-type BatchResult = {
-  success: boolean;
-  results: ItemResult[];
-  error?: string;
-};
+import { ItemResult, BatchResult } from '../../types.js';
 
 /**
  * Remove multiple items (tasks or projects) from OmniFocus

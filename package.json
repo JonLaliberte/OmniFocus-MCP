@@ -1,20 +1,22 @@
 {
   "name": "omnifocus-mcp",
   "type": "module",
-  "version": "1.2.3",
+  "version": "2.0.0-beta",
   "description": "Model Context Protocol (MCP) server that integrates with OmniFocus for AI assistant interaction",
   "main": "dist/server.js",
   "bin": {
     "omnifocus-mcp": "./cli.cjs"
   },
   "scripts": {
-    "build": "tsc && npm run copy-files && chmod 755 dist/server.js",
+    "build": "tsc && npm run copy-files && npm run build:skill && chmod 755 dist/server.js",
     "copy-files": "mkdir -p dist/utils/omnifocusScripts && cp src/utils/omnifocusScripts/*.js dist/utils/omnifocusScripts/",
+    "build:skill": "rm -f managing-omnifocus.skill && cd managing-omnifocus && zip -r ../managing-omnifocus.skill SKILL.md references/ assets/ scripts/ -x '*.DS_Store' 2>/dev/null; cd ..",
     "start": "node dist/server.js",
     "dev": "tsc -w"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.8.0",
+    "@toon-format/toon": "^2.1.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -23,9 +25,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/themotionmachine/omnifocus-mcp-server.git"
+    "url": "https://github.com/mattsmallman/omnifocus-mcp.git"
   },
-  "homepage": "https://github.com/themotionmachine/omnifocus-mcp-server",
+  "homepage": "https://github.com/mattsmallman/omnifocus-mcp",
   "keywords": [
     "omnifocus",
     "mcp",

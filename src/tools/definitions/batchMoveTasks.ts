@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { batchMoveTasks, BatchMoveTasksParams } from '../primitives/batchMoveTasks.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   tasks: z.array(z.object({
@@ -23,7 +23,7 @@ export const schema = z.object({
     .describe("Move all tasks back to inbox (set to true)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that each task has either taskId or taskName
     for (let i = 0; i < args.tasks.length; i++) {
@@ -73,8 +73,9 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await batchMoveTasks(args as BatchMoveTasksParams);
 
     if (result.success) {
+      cache.invalidate();
       // Tasks were moved successfully
-      let message = `✅ Moved ${result.movedCount} task${result.movedCount !== 1 ? 's' : ''}`;
+      let message = `Moved ${result.movedCount} task${result.movedCount !== 1 ? 's' : ''}`;
 
       if (result.toLocation) {
         message += ` to ${result.toLocation}`;

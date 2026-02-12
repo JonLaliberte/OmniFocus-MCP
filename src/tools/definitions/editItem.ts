@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { editItem, EditItemParams } from '../primitives/editItem.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the task or project to edit"),
@@ -33,7 +33,7 @@ export const schema = z.object({
   markReviewed: z.boolean().optional().describe("Mark project as reviewed - sets lastReviewDate to now and calculates next review date (projects only)")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that either id or name is provided
     if (!args.id && !args.name) {
@@ -50,6 +50,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await editItem(args as EditItemParams);
     
     if (result.success) {
+      cache.invalidate();
       // Item was edited successfully
       const itemTypeLabel = args.itemType === 'task' ? 'Task' : 'Project';
       let changedText = '';
@@ -61,7 +62,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       return {
         content: [{
           type: "text" as const,
-          text: `✅ ${itemTypeLabel} "${result.name}" updated successfully${changedText}.`
+          text: `${itemTypeLabel} "${result.name}" updated successfully${changedText}.`
         }]
       };
     } else {

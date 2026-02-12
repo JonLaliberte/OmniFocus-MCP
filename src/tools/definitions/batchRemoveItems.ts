@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { batchRemoveItems, BatchRemoveItemsParams } from '../primitives/batchRemoveItems.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   items: z.array(z.object({
@@ -10,7 +10,7 @@ export const schema = z.object({
   })).describe("Array of items (tasks or projects) to remove")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that each item has at least an ID or name
     for (const item of args.items) {
@@ -29,24 +29,25 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await batchRemoveItems(args.items as BatchRemoveItemsParams[]);
     
     if (result.success) {
+      cache.invalidate();
       const successCount = result.results.filter(r => r.success).length;
       const failureCount = result.results.filter(r => !r.success).length;
-      
-      let message = `✅ Successfully removed ${successCount} items.`;
-      
+
+      let message = `Removed ${successCount} items.`;
+
       if (failureCount > 0) {
-        message += ` ⚠️ Failed to remove ${failureCount} items.`;
+        message += ` Failed to remove ${failureCount} items.`;
       }
-      
+
       // Include details about removed items
       const details = result.results.map((item, index) => {
         if (item.success) {
           const itemType = args.items[index].itemType;
-          return `- ✅ ${itemType}: "${item.name}"`;
+          return `- OK ${itemType}: "${item.name}"`;
         } else {
           const itemType = args.items[index].itemType;
           const identifier = args.items[index].id || args.items[index].name;
-          return `- ❌ ${itemType}: ${identifier} - Error: ${item.error}`;
+          return `- FAILED ${itemType}: ${identifier} - Error: ${item.error}`;
         }
       }).join('\n');
       

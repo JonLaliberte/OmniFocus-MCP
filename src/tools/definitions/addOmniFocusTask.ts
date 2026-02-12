@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { addOmniFocusTask, AddOmniFocusTaskParams } from '../primitives/addOmniFocusTask.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   name: z.string().describe("The name of the task"),
@@ -18,14 +18,15 @@ export const schema = z.object({
   hierarchyLevel: z.number().int().min(0).optional().describe("Explicit level indicator for ordering in batch workflows (0=root) - ignored in single add")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Call the addOmniFocusTask function 
     const result = await addOmniFocusTask(args as AddOmniFocusTaskParams);
-    console.error('[add_omnifocus_task] args:', JSON.stringify(args));
-    console.error('[add_omnifocus_task] result:', JSON.stringify(result));
+    console.error('[add_task] args:', JSON.stringify(args));
+    console.error('[add_task] result:', JSON.stringify(result));
     
     if (result.success) {
+      cache.invalidate();
       // Determine actual placement
       const placement = (result as any).placement as 'parent' | 'project' | 'inbox' | undefined;
       let locationText = '';
@@ -48,13 +49,13 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       // Warning if parent requested but not used
       let placementWarning = '';
       if ((args.parentTaskId || args.parentTaskName) && placement && placement !== 'parent') {
-        placementWarning = `\n⚠️ Parent not found; task created ${placement === 'project' ? 'in project' : 'in inbox'}.`;
+        placementWarning = `\nNote: Parent not found; task created ${placement === 'project' ? 'in project' : 'in inbox'}.`;
       }
 
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Task "${args.name}" created successfully ${locationText}${dueDateText}${tagText}.${placementWarning}`
+          text: `Task "${args.name}" created successfully ${locationText}${dueDateText}${tagText}.${placementWarning}`
         }]
       };
     } else {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { removeItem, RemoveItemParams } from '../primitives/removeItem.js';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { cache } from '../../utils/cache.js';
 
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the task or project to permanently delete from database"),
@@ -8,7 +8,7 @@ export const schema = z.object({
   itemType: z.enum(['task', 'project']).describe("Type of item to permanently delete ('task' or 'project'). WARNING: This deletes the item from the database. To mark items as done, use edit_item with newStatus='completed' instead.")
 });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: Record<string, unknown>) {
   try {
     // Validate that either id or name is provided
     if (!args.id && !args.name) {
@@ -39,13 +39,14 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await removeItem(args as RemoveItemParams);
     
     if (result.success) {
+      cache.invalidate();
       // Item was removed successfully
       const itemTypeLabel = args.itemType === 'task' ? 'Task' : 'Project';
       
       return {
         content: [{
           type: "text" as const,
-          text: `✅ ${itemTypeLabel} "${result.name}" removed successfully.`
+          text: `${itemTypeLabel} "${result.name}" removed successfully.`
         }]
       };
     } else {

@@ -1,6 +1,4 @@
-import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { executeOmniJS } from '../../utils/scriptExecution.js';
 
 // Interface for task creation parameters
 export interface AddOmniFocusTaskParams {
@@ -136,19 +134,8 @@ function generateJXAScript(params: AddOmniFocusTaskParams): string {
  */
 export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<{success: boolean, taskId?: string, error?: string, placement?: 'parent' | 'project' | 'inbox'}> {
   try {
-    // Generate JXA script
     const script = generateJXAScript(params);
-    console.error("Executing JXA script for task creation...");
-
-    // Write to a temporary file
-    const tempFile = `${tmpdir()}/omnifocus_add_${Date.now()}.js`;
-    writeFileSync(tempFile, script, { encoding: 'utf8' });
-
-    // Execute the script
-    const result = await executeOmniFocusScript(tempFile);
-
-    // Cleanup temp file
-    try { unlinkSync(tempFile); } catch {}
+    const result = await executeOmniJS(script);
 
     if (result.error) {
       return {
